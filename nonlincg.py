@@ -4,7 +4,17 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # Use Armijo line search to satify wolfe conditions
-def search(f, g, x, d, alpha0=10.0, rho=0.5, c1=1e-4, c2=0.9):
+def search(f, g, x, d, alpha0=10.0, rho=0.5, c1=1e-4, c2=0.9, A = None):
+    '''
+    f: objective function
+    g: gradient of objective function
+    x: initial point
+    d: search direction
+    alpha0: initial step size
+    rho: step size reduction factor
+    c1: Armijo parameter
+    c2: Wolfe parameter
+    '''
     alpha = alpha0
     grad = g(x)
     
@@ -16,9 +26,22 @@ def search(f, g, x, d, alpha0=10.0, rho=0.5, c1=1e-4, c2=0.9):
     # line search failed
     return 0
 
-
+# exact line search for quadratic case
+def q_search(f, g, x, d, A, alpha0=None, rho=None, c1=None, c2=None):
+    r = g(x)
+    return (r @ r) / (d @ A @ d)
 # Nonlinear conjugate gradient
-def NLCG(f, g, x0, compute_beta=None, ls=search, max_iter=1000, solution=None, mode = 'function'):    
+def NLCG(f, g, x0, compute_beta=None,  max_iter=1000, solution=None, mode = 'function', A = None):    
+    '''
+    f: objective function
+    g: gradient of objective function
+    x0: initial point
+    compute_beta: function to compute beta
+    ls: line search method
+    max_iter: maximum number of iterations
+    solution: solution vector
+    mode: mode of evaluating error
+    '''
     def error_func(mode):
         if mode == 'f':
             return np.linalg.norm(f(x) - f(solution))
@@ -39,10 +62,11 @@ def NLCG(f, g, x0, compute_beta=None, ls=search, max_iter=1000, solution=None, m
     
     # main loop
     for k in range(max_iter):
+        # stop algorithm if tolerance is met, to calculate convergence rate
         if error_func(mode) < tol:
             counter = k
             break
-        alpha = ls(f, g, x, d)
+        alpha = search(f, g, x, d, A = A)
         x_new = x + alpha * d
         g_new = g(x_new)
         
@@ -54,12 +78,39 @@ def NLCG(f, g, x0, compute_beta=None, ls=search, max_iter=1000, solution=None, m
         x = x_new
         r = g_new
         d = d_new
-    C = np.log(errors[0:counter-1])
-    D = np.arange(1,counter)
-    coef = np.polyfit(D, C, 1)
-    return x, errors, coef
+
+    return x, errors, calculate_rate(errors, counter)
+
+# sometimes polyfit hits error
+def calculate_rate(errors, M):
+    relevant = errors[:M]
+    y = np.log(relevant[1:])
+    x = np.log(relevant[:-1])
+    if np.any(np.isnan(y)) or np.any(np.isnan(x)):
+        return np.zeros(2), None
+    try:
+        coeff = np.polyfit(x,y, 1)
+    except:
+        return np.zeros(2), None
+    coeff[1] = np.e**coeff[1]
+    slope = coeff[0]
+    c = coeff[1]
+
+    # sublinear convergence, estimate p for convergence rate C/k^p
+    if slope < 0.95 or abs(c) >= 1:
+        y1 = np.log(relevant)
+        x1 = np.log(np.arange(1,M+1))
+        coeff = np.polyfit(-x1, y1, 1)
+        return coeff, False
+    return coeff, True
 
 def ag_search(f, g, y, alpha0=10.0, rho=0.5):
+    '''
+    f: objective function
+    g: gradient of objective function
+    y: initial point
+    alpha0: initial step size
+    '''
     grad = g(y)
     alpha = alpha0
     for _ in range(100):
@@ -69,7 +120,16 @@ def ag_search(f, g, y, alpha0=10.0, rho=0.5):
     # line search failed
     return 0
 
-def AG(f, g, x0, ls = ag_search, max_iter=1000, solution=None, mode='function'):
+def AG(f, g, x0, max_iter=1000, solution=None, mode='function', A = None):
+    '''
+    f: objective function
+    g: gradient of objective function
+    x0: initial point
+    ls: line search method
+    max_iter: maximum number of iterations
+    solution: solution vector
+    mode: mode of evaluating error
+    '''
     def error_func(mode):
         if mode == 'f':
             return np.linalg.norm(f(x) - f(solution))
@@ -92,7 +152,7 @@ def AG(f, g, x0, ls = ag_search, max_iter=1000, solution=None, mode='function'):
         if error_func(mode) < tol:
             counter = k
             break
-        alpha = ls(f, g, y)
+        alpha = ag_search(f, g, y)
 
         grad = g(y)
         x_new = y - alpha * grad
@@ -102,16 +162,12 @@ def AG(f, g, x0, ls = ag_search, max_iter=1000, solution=None, mode='function'):
         x = x_new
         y = y_new
     
-    C = np.log(errors[0:counter-1])
-    D = np.arange(1, counter)
-    coef = np.polyfit(D, C, 1)
-    
-    return x, errors, coef
+    return x, errors, calculate_rate(errors, counter)
 
 def FR(f, g, g_new, d, x, x_new, k):
     return np.linalg.norm(g_new)**2/np.linalg.norm(g)**2
 def PRP(f, g, g_new, d, x, x_new, k):
-    return np.dot(g_new, g_new-g) / np.linalg.norm(g)
+    return np.dot(g_new, g_new-g) / np.linalg.norm(g)**2
 def HS(f, g, g_new, d, x, x_new, k):
     return np.dot(g_new, g_new - g)/np.dot(d, g_new - g)
 def DY(f, g, g_new, d, x, x_new, k):
@@ -144,7 +200,6 @@ def MAD(f, g, g_new, d, x, x_new, k):
     return np.random.random() **np.log(n) * beta
 def SD(f, g, g_new, d, x, x_new, k):
     return 0
-
 
 def rosenbrock(x):
     m = len(x)
