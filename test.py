@@ -1,37 +1,24 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import pycutest
 
+p = pycutest.import_problem('ROSENBR')
 
-# np.random.seed(0)
-np.seterr(all='ignore')
+print("Rosenbrock function in %gD" % p.n)
 
-# initialization
-n = 200
-maxiter = 1000
-solution = np.ones(n)
-x0 = np.random.rand(n) * 10
-a = np.random.rand(n,n)
-A = a.T @ a + np.eye(n)
-b = A @ solution
-mode = 'f'
+iters = 0
 
-# plotting and algorithm
-plt.figure(figsize=(12, 12))
-i = 0
-errors = np.array([0.5**i for i in range(n)])
-plt.semilogy(errors[1:] - errors[:-1])
+x = p.x0
+f, g = p.obj(x, gradient=True)  # objective and gradient
+H = p.hess(x)  # Hessian
 
+while iters < 100 and np.linalg.norm(g) > 1e-10:
+    print("Iteration %g: objective value is %g with norm of gradient %g at x = %s" % (iters, f, np.linalg.norm(g), str(x)))
+    s = np.linalg.solve(H, -g)  # Newton step
+    x = x + s  # used fixed step length
+    f, g = p.obj(x, gradient=True)
+    H = p.hess(x)
+    iters += 1
 
-x = np.arange(1,n+1)
-y = np.array([0.1**(i) for i in range(n)])
-plt.semilogy(x,y, label = 'semilogy')
-print(np.polyfit(np.log(x), np.log(y), 1))
-# more plotting
-plt.xlabel('Iteration')
-plt.ylabel(f'{mode}-error (log scale)')
-plt.title(f'{mode}-error vs Iteration')
-plt.legend()
-# plt.ylim([1e-12, f1(x0)])
-plt.ylim([1e-12, 1])
-plt.grid(True)
-plt.show()
+print("Found minimum x = %s after %g iterations" % (str(x), iters))
+print("Done")
